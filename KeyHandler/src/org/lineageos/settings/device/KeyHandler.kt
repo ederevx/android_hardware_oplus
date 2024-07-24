@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.media.AudioSystem
+import android.os.UEventObserver
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -49,31 +50,45 @@ class KeyHandler(context: Context) : DeviceKeyHandler {
         }
     }
 
+    private val alertSliderEventObserver = object : UEventObserver() {
+        private val lock = Any()
+
+        override fun onUEvent(event: UEvent) {
+            synchronized(lock) {
+                event.get("SWITCH_STATE")?.let {
+                    handleMode(it.toInt())
+                    return
+                }
+                event.get("STATE")?.let {
+                    val none = it.contains("USB=0")
+                    val vibration = it.contains("HOST=0")
+                    val silent = it.contains("null)=0")
+
+                    if (none && !vibration && !silent) {
+                        handleMode(POSITION_BOTTOM)
+                    } else if (!none && vibration && !silent) {
+                        handleMode(POSITION_MIDDLE)
+                    } else if (!none && !vibration && silent) {
+                        handleMode(POSITION_TOP)
+                    }
+
+                    return
+                }
+            }
+        }
+    }
+
     init {
         context.registerReceiver(
             broadcastReceiver,
             IntentFilter(AudioManager.STREAM_MUTE_CHANGED_ACTION)
         )
+        alertSliderEventObserver.startObserving("tri-state-key")
+        alertSliderEventObserver.startObserving("tri_state_key")
     }
 
     override fun handleKeyEvent(event: KeyEvent): KeyEvent? {
-        if (event.action != KeyEvent.ACTION_DOWN) {
-            return event
-        }
-
-        val deviceName = event.device.name
-
-        if (deviceName != "oplus,hall_tri_state_key" && deviceName != "oplus,tri-state-key") {
-            return event
-        }
-
-        when (File("/proc/tristatekey/tri_state").readText().trim()) {
-            "1" -> handleMode(POSITION_TOP)
-            "2" -> handleMode(POSITION_MIDDLE)
-            "3" -> handleMode(POSITION_BOTTOM)
-        }
-
-        return null
+        return event
     }
 
     private fun vibrateIfNeeded(mode: Int) {
